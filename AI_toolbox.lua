@@ -150,20 +150,30 @@ local function tag_button()
   local selected_model = cbb_model.value
   local nb_tag = cbb_tag.value
 
-  for _, img in ipairs(images) do
-    local full_path = img.path .. "/" .. img.filename
+  dt.control.dispatch(function()
+    local job = dt.gui.create_job("AI Tag Assistant: analyzing " .. #images .. " image(s)...", true)
 
-    -- Optionally clear existing tags
-    if cbt_clear.value == true then
-      local current_tags = dt.tags.get_tags(img)
-      for _, tag in ipairs(current_tags) do
-        dt.tags.detach(tag, img)
+    for idx, img in ipairs(images) do
+      job.percent = (idx - 1) / #images
+      if txt_evaluation then
+        txt_evaluation.label = pad_multiline_text("AI Tagging: Analyzing image " .. idx .. " of " .. #images .. "\n" .. make_progress_bar((idx - 1) / #images), 8)
       end
-    end
+      dt.print(string.format("AI Tagging: Analyzing %d/%d (%s)...", idx, #images, img.filename))
+      dt.control.sleep(50) -- Yield to GUI thread to draw progress
 
-    dt.print("Processing: " .. full_path)
-    local jpeg_path = export_to_temp_jpeg(img)
-    local docker_path = host_to_docker_path(jpeg_path)
+      local full_path = img.path .. "/" .. img.filename
+
+      -- Optionally clear existing tags
+      if cbt_clear.value == true then
+        local current_tags = dt.tags.get_tags(img)
+        for _, tag in ipairs(current_tags) do
+          dt.tags.detach(tag, img)
+        end
+      end
+
+      dt.print("Processing: " .. full_path)
+      local jpeg_path = export_to_temp_jpeg(img)
+      local docker_path = host_to_docker_path(jpeg_path)
 
       -- Build prompt
       local prompt = "Analyze this image. Provide exactly " .. nb_tag ..
@@ -206,17 +216,27 @@ local function tag_button()
           dt.tags.attach(tag_obj, img)
           print("Added tag: " .. cleaned_tag .. " to " .. img.filename)
         end
+      end
+
+      os.remove(jpeg_path) -- clean up
+      job.percent = idx / #images
     end
-
-    os.remove(jpeg_path) -- clean up
-  end
-
-  dt.print("Tagging complete for " .. #images .. " image(s).")
+    job.valid = false
+    if txt_evaluation then
+      txt_evaluation.label = pad_multiline_text("Tagging complete for " .. #images .. " image(s).", 8)
+    end
+    dt.print("Tagging complete for " .. #images .. " image(s).")
+  end)
 end
 
------------------------------------------------------------------------
--- Rating
------------------------------------------------------------------------
+local function make_progress_bar(percent, width)
+  width = width or 10
+  local filled = math.floor(percent * width)
+  local empty = width - filled
+  return "[" .. string.rep("█", filled) .. string.rep("░", empty) .. "] " .. math.floor(percent * 100) .. "%"
+end
+
+
 local function btt_rating()
   local images = dt.gui.selection()
   if #images == 0 then
@@ -225,12 +245,22 @@ local function btt_rating()
   local selected_model = cbb_model.value
   local strictness = cbb_lvl.value
 
-  for _, img in ipairs(images) do
-    local full_path = img.path .. "/" .. img.filename
-    dt.print("Processing: " .. full_path)
+  dt.control.dispatch(function()
+    local job = dt.gui.create_job("AI Rating: evaluating " .. #images .. " image(s)...", true)
 
-    local jpeg_path = export_to_temp_jpeg(img)
-    local docker_path = host_to_docker_path(jpeg_path)
+    for idx, img in ipairs(images) do
+      job.percent = (idx - 1) / #images
+      if txt_evaluation then
+        txt_evaluation.label = pad_multiline_text("AI Rating: Evaluating image " .. idx .. " of " .. #images .. "\n" .. make_progress_bar((idx - 1) / #images), 8)
+      end
+      dt.print(string.format("AI Rating: Evaluating %d/%d (%s)...", idx, #images, img.filename))
+      dt.control.sleep(50) -- Yield to GUI thread to draw progress
+
+      local full_path = img.path .. "/" .. img.filename
+      dt.print("Processing: " .. full_path)
+
+      local jpeg_path = export_to_temp_jpeg(img)
+      local docker_path = host_to_docker_path(jpeg_path)
 
       local prompt = "You are a " .. strictness .. " professional photography evaluator. " ..
                      "Assess this image's potential. " ..
@@ -273,9 +303,11 @@ local function btt_rating()
         print("No valid rating found for " .. img.filename)
       end
       os.remove(jpeg_path)
+      job.percent = idx / #images
     end
+    job.valid = false
     dt.print("Rating complete for " .. #images .. " image(s).")
-  end
+  end)
 end
 
 -----------------------------------------------------------------------
@@ -288,74 +320,87 @@ local function btt_select_best()
     return
   end
   local selected_model = cbb_model.value
-  local criteria = cbb_crt.value
-  local prompt = "Compare these images. Select ONLY the best one (the one with the highest potential for photography). " ..
-                 "Focus on " .. criteria .. ". " ..
-                 "Start your response with 'Best Image: <number>' (using the 1-based index of the image in the order provided, e.g. Best Image: 1) followed by a newline. " ..
-                 "Then, provide a detailed comparison and technical justification explaining why you selected it over the other images. " ..
-                 "Do not write anything else before the 'Best Image' header."
+  
+  dt.control.dispatch(function()
+    local job = dt.gui.create_job("AI Top Pick: comparing " .. #images .. " images...", false)
+    if txt_evaluation then
+      txt_evaluation.label = pad_multiline_text("AI Top Pick: Comparing " .. #images .. " images...\n" .. make_progress_bar(0.5) .. " (Analyzing)", 8)
+    end
+    dt.print("AI Top Pick: Comparing " .. #images .. " images...")
+    dt.control.sleep(50) -- Yield to GUI thread to draw spinner
 
-  local docker_paths = {}          -- container‑visible paths
-  local native_paths = {}          -- host‑visible paths
-  local tempfile_paths = {}        -- keep track for cleanup
+    local criteria = cbb_crt.value
+    local prompt = "Compare these images. Select ONLY the best one (the one with the highest potential for photography). " ..
+                   "Focus on " .. criteria .. ". " ..
+                   "Start your response with 'Best Image: <number>' (using the 1-based index of the image in the order provided, e.g. Best Image: 1) followed by a newline. " ..
+                   "Then, provide a detailed comparison and technical justification explaining why you selected it over the other images. " ..
+                   "Do not write anything else before the 'Best Image' header."
 
-  for idx, img in ipairs(images) do
-    local jpeg_path = export_to_temp_jpeg(img)
-    if not jpeg_path then
-      dt.print("Export failed for " .. img.filename)
+    local docker_paths = {}          -- container‑visible paths
+    local native_paths = {}          -- host‑visible paths
+    local tempfile_paths = {}        -- keep track for cleanup
+
+    for idx, img in ipairs(images) do
+      local jpeg_path = export_to_temp_jpeg(img)
+      if not jpeg_path then
+        dt.print("Export failed for " .. img.filename)
+        job.valid = false
+        return
+      end
+      local docker_path = host_to_docker_path(jpeg_path)
+      table.insert(docker_paths, '"' .. docker_path .. '"')
+      table.insert(native_paths, '"' .. jpeg_path .. '"')
+      table.insert(tempfile_paths, { img = img, path = jpeg_path })
+    end
+
+    -- Commands for Docker vs Native Ollama
+    local command_docker = string.format(
+      'docker exec ollama ollama run "%s" "%s" %s',
+      selected_model, prompt, table.concat(docker_paths, " ")
+    )
+    local command_native = string.format(
+      '"%s" run "%s" "%s" %s < /dev/null',
+      get_ollama_path(), selected_model, prompt, table.concat(native_paths, " ")
+    )
+
+    -- Run depending on selected installation
+    local output
+    if cbb_ollama.value == "Docker" then
+      print("Running in Docker mode: " .. command_docker)
+      local handle = io.popen(command_docker)
+      output = handle:read("*a")
+      handle:close()
+    else -- Native
+      print("Running in Native mode: " .. command_native)
+      local handle = io.popen(command_native)
+      output = handle:read("*a")
+      handle:close()
+    end
+
+    output = clean_ollama_output(output, "best image:")
+
+    dt.print("Ollama output: " .. output)
+    local chosen_index = tonumber(output:lower():match("best image:%s*(%d+)"))
+    if not chosen_index or chosen_index < 1 or chosen_index > #images then
+      dt.print("Could not determine best image index")
+      for _, t in ipairs(tempfile_paths) do os.remove(t.path) end
+      job.valid = false
       return
     end
-    local docker_path = host_to_docker_path(jpeg_path)
-    table.insert(docker_paths, '"' .. docker_path .. '"')
-    table.insert(native_paths, '"' .. jpeg_path .. '"')
-    table.insert(tempfile_paths, { img = img, path = jpeg_path })
-  end
 
-  -- Commands for Docker vs Native Ollama
-  local command_docker = string.format(
-    'docker exec ollama ollama run "%s" "%s" %s',
-    selected_model, prompt, table.concat(docker_paths, " ")
-  )
-  local command_native = string.format(
-    '"%s" run "%s" "%s" %s < /dev/null',
-    get_ollama_path(), selected_model, prompt, table.concat(native_paths, " ")
-  )
-
-  -- Run depending on selected installation
-  local output
-  if cbb_ollama.value == "Docker" then
-    print("Running in Docker mode: " .. command_docker)
-    local handle = io.popen(command_docker)
-    output = handle:read("*a")
-    handle:close()
-  else -- Native
-    print("Running in Native mode: " .. command_native)
-    local handle = io.popen(command_native)
-    output = handle:read("*a")
-    handle:close()
-  end
-
-  output = clean_ollama_output(output, "best image:")
-
-  dt.print("Ollama output: " .. output)
-  local chosen_index = tonumber(output:lower():match("best image:%s*(%d+)"))
-  if not chosen_index or chosen_index < 1 or chosen_index > #images then
-    dt.print("Could not determine best image index")
-    for _, t in ipairs(tempfile_paths) do os.remove(t.path) end
-    return
-  end
-
-  for idx, t in ipairs(tempfile_paths) do
-    if idx ~= chosen_index then
-      t.img.rating = -1
-      print("Rejected: " .. t.img.filename)
-    else
-      t.img.rating = 0
-      print("Best image kept: " .. t.img.filename)
+    for idx, t in ipairs(tempfile_paths) do
+      if idx ~= chosen_index then
+        t.img.rating = -1
+        print("Rejected: " .. t.img.filename)
+      else
+        t.img.rating = 0
+        print("Best image kept: " .. t.img.filename)
+      end
+      os.remove(t.path)
     end
-    os.remove(t.path)
-  end
-  dt.print("Best image kept. Others rejected.")
+    job.valid = false
+    dt.print("Best image kept. Others rejected.")
+  end)
 end
 
 -----------------------------------------------------------------------
