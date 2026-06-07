@@ -48,6 +48,18 @@ local function clean_ollama_output(output, start_pattern)
   return output
 end
 
+local function pad_multiline_text(text, min_lines)
+  if not text or text == "" then
+    return string.rep("\n", min_lines)
+  end
+  local _, count = text:gsub("\n", "")
+  local missing = min_lines - count
+  if missing > 0 then
+    return text .. string.rep("\n", missing)
+  end
+  return text
+end
+
 local script_data = {}
 script_data.metadata = {
   name = "AI Tollbox",
@@ -58,6 +70,7 @@ local mE = {}
 mE.widgets = {}
 mE.event_registered = false
 mE.module_installed = false
+local txt_evaluation = nil
 
 -----------------------------------------------------------------------
 -- Helper function: translate host path to docker /tmp path
@@ -119,6 +132,9 @@ local cbb_ollama = dt.new_widget("combobox") {
   label = _("Ollama installation"),
   value = 2,
   "Docker","Native"
+}
+txt_evaluation = dt.new_widget("label") {
+  label = pad_multiline_text(_("Select a photo and click 'Generate' to see the technical assessment."), 8)
 }
 local cbt_clear = dt.new_widget("check_button"){label = _("Clear tags first"), value = true}
 local separator1 = dt.new_widget("separator"){}
@@ -302,6 +318,12 @@ local function btt_rating()
       else
         print("No valid rating found for " .. img.filename)
       end
+      pcall(function()
+        img.description = output
+      end)
+      if txt_evaluation then
+        txt_evaluation.label = pad_multiline_text(output, 8)
+      end
       os.remove(jpeg_path)
       job.percent = idx / #images
     end
@@ -394,9 +416,15 @@ local function btt_select_best()
         print("Rejected: " .. t.img.filename)
       else
         t.img.rating = 0
+        pcall(function()
+          t.img.description = output
+        end)
         print("Best image kept: " .. t.img.filename)
       end
       os.remove(t.path)
+    end
+    if txt_evaluation then
+      txt_evaluation.label = pad_multiline_text(output, 8)
     end
     job.valid = false
     dt.print("Best image kept. Others rejected.")
@@ -426,6 +454,7 @@ local function restart() dt.gui.libs["AIToolbox"].visible = true end
 -- Labels
 local lbl_tag = dt.new_widget("section_label"); lbl_tag.label = _("AI Tag Assistant")
 local lbl_rating = dt.new_widget("section_label"); lbl_rating.label = _("AI Rating")
+local lbl_evaluation = dt.new_widget("section_label"); lbl_evaluation.label = _("AI Technical Evaluation")
 local lbl_setting = dt.new_widget("section_label"); lbl_setting.label = _("Settings")
 local lbl_reject = dt.new_widget("section_label"); lbl_reject.label = _("AI's Top Pick'")
 
@@ -437,6 +466,7 @@ local reject_button = dt.new_widget("button") {label=_("Generate"), clicked_call
 mE.widgets = {
   lbl_tag, cbt_clear, cbb_tag, separator1, generate_button,
   lbl_rating, cbb_lvl, rating_button,
+  lbl_evaluation, txt_evaluation,
   lbl_reject, cbb_crt, reject_button,
   lbl_setting, cbb_ollama, cbb_model, sld_quality, sld_size
 }
@@ -451,6 +481,37 @@ else
     mE.event_registered = true
   end
 end
+
+dt.register_event("AIToolbox_selection", "selection-changed", function(event)
+  dt.control.dispatch(function()
+    dt.control.sleep(100)
+    pcall(function()
+      if txt_evaluation then
+        local images = dt.gui.selection()
+        if #images == 1 then
+          local img = images[1]
+          local desc = img.description or ""
+          if desc == "" then
+            desc = "(No technical evaluation generated yet)"
+          end
+          txt_evaluation.label = pad_multiline_text("Selected: " .. img.filename .. "\n\n" .. desc, 8)
+        elseif #images > 1 then
+          local list = {}
+          for i, img in ipairs(images) do
+            if i > 10 then
+              table.insert(list, "... and " .. (#images - 10) .. " more")
+              break
+            end
+            table.insert(list, "- " .. img.filename)
+          end
+          txt_evaluation.label = pad_multiline_text("Selected photos (" .. #images .. "):\n" .. table.concat(list, "\n"), 8)
+        else
+          txt_evaluation.label = pad_multiline_text("No image selected.", 8)
+        end
+      end
+    end)
+  end)
+end)
 
 script_data.destroy = destroy
 script_data.restart = restart
