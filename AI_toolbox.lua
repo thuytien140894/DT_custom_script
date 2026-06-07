@@ -178,12 +178,15 @@ local function tag_button()
       dt.control.sleep(50) -- Yield to GUI thread to draw progress
 
       local full_path = img.path .. "/" .. img.filename
+      local members = img:get_group_members()
 
       -- Optionally clear existing tags
       if cbt_clear.value == true then
-        local current_tags = dt.tags.get_tags(img)
-        for _, tag in ipairs(current_tags) do
-          dt.tags.detach(tag, img)
+        for _, m in ipairs(members) do
+          local current_tags = dt.tags.get_tags(m)
+          for _, tag in ipairs(current_tags) do
+            dt.tags.detach(tag, m)
+          end
         end
       end
 
@@ -229,8 +232,10 @@ local function tag_button()
         local cleaned_tag = tag:match("^%s*(.-)%s*$")
         if cleaned_tag ~= "" then
           local tag_obj = dt.tags.create(cleaned_tag)
-          dt.tags.attach(tag_obj, img)
-          print("Added tag: " .. cleaned_tag .. " to " .. img.filename)
+          for _, m in ipairs(members) do
+            dt.tags.attach(tag_obj, m)
+          end
+          print("Added tag: " .. cleaned_tag .. " to group members of " .. img.filename)
         end
       end
 
@@ -310,17 +315,22 @@ local function btt_rating()
       output = clean_ollama_output(output, "rating:")
 
       local rating = tonumber(output:lower():match("rating:%s*(-?%d+)"))
+      local members = img:get_group_members()
       if rating then
         if rating < -1 then rating = -1 end
         if rating > 5 then rating = 5 end
-        img.rating = rating
-        print("Set rating for " .. img.filename .. " to " .. rating)
+        for _, m in ipairs(members) do
+          m.rating = rating
+        end
+        print("Set rating for group members of " .. img.filename .. " to " .. rating)
       else
         print("No valid rating found for " .. img.filename)
       end
-      pcall(function()
-        img.description = output
-      end)
+      for _, m in ipairs(members) do
+        pcall(function()
+          m.description = output
+        end)
+      end
       if txt_evaluation then
         txt_evaluation.label = pad_multiline_text(output, 8)
       end
@@ -411,15 +421,20 @@ local function btt_select_best()
     end
 
     for idx, t in ipairs(tempfile_paths) do
+      local members = t.img:get_group_members()
       if idx ~= chosen_index then
-        t.img.rating = -1
-        print("Rejected: " .. t.img.filename)
+        for _, m in ipairs(members) do
+          m.rating = -1
+        end
+        print("Rejected group: " .. t.img.filename)
       else
-        t.img.rating = 0
-        pcall(function()
-          t.img.description = output
-        end)
-        print("Best image kept: " .. t.img.filename)
+        for _, m in ipairs(members) do
+          m.rating = 0
+          pcall(function()
+            m.description = output
+          end)
+        end
+        print("Best image group kept: " .. t.img.filename)
       end
       os.remove(t.path)
     end
