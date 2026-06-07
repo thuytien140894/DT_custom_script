@@ -3,6 +3,51 @@ local du = require "lib/dtutils"
 du.check_min_api_version("7.0.0", "moduleExample")
 local gettext = dt.gettext.gettext
 local function _(msgid) return gettext(msgid) end
+local function get_ollama_path()
+  local osname = dt.configuration.running_os
+  if osname == "windows" then
+    return "ollama"
+  end
+  local paths = {
+    "/opt/homebrew/bin/ollama",
+    "/usr/local/bin/ollama",
+    "/usr/bin/ollama",
+    "/Applications/Ollama.app/Contents/Resources/ollama"
+  }
+  for _, path in ipairs(paths) do
+    local f = io.open(path, "r")
+    if f then
+      f:close()
+      return path
+    end
+  end
+  return "ollama"
+end
+
+local function clean_ollama_output(output, start_pattern)
+  if not output then return "" end
+  
+  -- Strip ANSI escape codes
+  output = output:gsub("\27%[[%d;]*%a", "")
+  
+  -- Strip backspaces (ASCII 8) if any
+  output = output:gsub("\8", "")
+
+  -- Find start pattern and trim prefix
+  if start_pattern then
+    local lower_output = output:lower()
+    local start_idx = lower_output:find(start_pattern:lower())
+    if start_idx then
+      output = output:sub(start_idx)
+    end
+  end
+
+  -- Strip leading/trailing whitespace
+  output = output:gsub("^%s*(.-)%s*$", "%1")
+
+  return output
+end
+
 local script_data = {}
 script_data.metadata = {
   name = "AI Tollbox",
@@ -47,7 +92,7 @@ local cbb_tag = dt.new_widget("combobox") {
 }
 local cbb_model = dt.new_widget("combobox") {
   label = _("Model"),
-  value = 2,
+  value = 5,
   "gemma3:27b","gemma3:12b","gemma3:4b","minicpm-v:8b","llava:7b"
 }
 local cbb_lvl = dt.new_widget("combobox") {
@@ -72,7 +117,7 @@ local sld_size = dt.new_widget("slider") {
 }
 local cbb_ollama = dt.new_widget("combobox") {
   label = _("Ollama installation"),
-  value = 1,
+  value = 2,
   "Docker","Native"
 }
 local cbt_clear = dt.new_widget("check_button"){label = _("Clear tags first"), value = true}
@@ -120,47 +165,47 @@ local function tag_button()
     local jpeg_path = export_to_temp_jpeg(img)
     local docker_path = host_to_docker_path(jpeg_path)
 
-    -- Build prompt
-    local prompt = "You are an expert in photo editing and darktable tag generation. " ..
-                   "I will give you a description of an image. Based on the description, " ..
-                   "provide a list of exactly " .. nb_tag ..
-                   " darktable tags. " ..
-                   "Only put the most pertinent tags. Do not include any introductory phrases. Only the tags separated with comas."
+      -- Build prompt
+      local prompt = "Analyze this image. Provide exactly " .. nb_tag ..
+                     " descriptive tags for it. " ..
+                     "Only output the tags separated with commas. Do not include any other text, explanations, or introductory phrases."
 
-    -- Commands for Docker vs Native Ollama
-    local command_docker = string.format(
-      'docker exec ollama ollama run "%s" "%s" "%s"',
-      selected_model, prompt, docker_path
-    )
-    local command_native = string.format(
-      'ollama run "%s" "%s" "%s"',
-      selected_model, prompt, jpeg_path
-    )
+      -- Commands for Docker vs Native Ollama
+      local command_docker = string.format(
+        'docker exec ollama ollama run "%s" "%s" "%s"',
+        selected_model, prompt, docker_path
+      )
+      local command_native = string.format(
+        '"%s" run "%s" "%s" "%s" < /dev/null',
+        get_ollama_path(), selected_model, prompt, jpeg_path
+      )
 
-    -- Run depending on selected installation
-    local output
-    if cbb_ollama.value == "Docker" then
-      print("Running in Docker mode: " .. command_docker)
-      local handle = io.popen(command_docker)
-      output = handle:read("*a")
-      handle:close()
-    else -- Native
-      print("Running in Native mode: " .. command_native)
-      local handle = io.popen(command_native)
-      output = handle:read("*a")
-      handle:close()
-    end
-
-    dt.print("Ollama output for " .. img.filename .. ": " .. output)
-
-    -- Parse comma-separated tags
-    for tag in string.gmatch(output, '([^,]+)') do
-      local cleaned_tag = tag:match("^%s*(.-)%s*$")
-      if cleaned_tag ~= "" then
-        local tag_obj = dt.tags.create(cleaned_tag)
-        dt.tags.attach(tag_obj, img)
-        print("Added tag: " .. cleaned_tag .. " to " .. img.filename)
+      -- Run depending on selected installation
+      local output
+      if cbb_ollama.value == "Docker" then
+        print("Running in Docker mode: " .. command_docker)
+        local handle = io.popen(command_docker)
+        output = handle:read("*a")
+        handle:close()
+      else -- Native
+        print("Running in Native mode: " .. command_native)
+        local handle = io.popen(command_native)
+        output = handle:read("*a")
+        handle:close()
       end
+
+      output = clean_ollama_output(output)
+
+      dt.print("Ollama output for " .. img.filename .. ": " .. output)
+
+      -- Parse comma-separated tags
+      for tag in string.gmatch(output, '([^,]+)') do
+        local cleaned_tag = tag:match("^%s*(.-)%s*$")
+        if cleaned_tag ~= "" then
+          local tag_obj = dt.tags.create(cleaned_tag)
+          dt.tags.attach(tag_obj, img)
+          print("Added tag: " .. cleaned_tag .. " to " .. img.filename)
+        end
     end
 
     os.remove(jpeg_path) -- clean up
@@ -187,46 +232,50 @@ local function btt_rating()
     local jpeg_path = export_to_temp_jpeg(img)
     local docker_path = host_to_docker_path(jpeg_path)
 
-    local prompt = "You are " .. strictness .. " professional photography evaluator. " ..
-                   "I will provide an image. Assess its potential after editing. " ..
-                   "Respond only with a single number, using this scale: -1 Reject, 1 Very Bad, 2 Bad, 3 Okay, 4 Good, 5 Very Good"
+      local prompt = "You are a " .. strictness .. " professional photography evaluator. " ..
+                     "Assess this image's potential. " ..
+                     "Start your response with 'Rating: <number>' (using a scale from -1 to 5: -1 Reject, 1 Very Bad, 2 Bad, 3 Okay, 4 Good, 5 Very Good) followed by a newline. " ..
+                     "Then, provide a detailed technical assessment of composition, lighting, and color. Do not write anything else before the rating."
 
-    -- Commands for Docker vs Native Ollama
-    local command_docker = string.format(
-      'docker exec ollama ollama run "%s" "%s" "%s"',
-      selected_model, prompt, docker_path
-    )
-    local command_native = string.format(
-      'ollama run "%s" "%s" "%s"',
-      selected_model, prompt, jpeg_path
-    )
+      -- Commands for Docker vs Native Ollama
+      local command_docker = string.format(
+        'docker exec ollama ollama run "%s" "%s" "%s"',
+        selected_model, prompt, docker_path
+      )
+      local command_native = string.format(
+        '"%s" run "%s" "%s" "%s" < /dev/null',
+        get_ollama_path(), selected_model, prompt, jpeg_path
+      )
 
-    -- Run depending on selected installation
-    local output
-    if cbb_ollama.value == "Docker" then
-      print("Running in Docker mode: " .. command_docker)
-      local handle = io.popen(command_docker)
-      output = handle:read("*a")
-      handle:close()
-    else -- Native
-      print("Running in Native mode: " .. command_native)
-      local handle = io.popen(command_native)
-      output = handle:read("*a")
-      handle:close()
+      -- Run depending on selected installation
+      local output
+      if cbb_ollama.value == "Docker" then
+        print("Running in Docker mode: " .. command_docker)
+        local handle = io.popen(command_docker)
+        output = handle:read("*a")
+        handle:close()
+      else -- Native
+        print("Running in Native mode: " .. command_native)
+        local handle = io.popen(command_native)
+        output = handle:read("*a")
+        handle:close()
+      end
+
+      output = clean_ollama_output(output, "rating:")
+
+      local rating = tonumber(output:lower():match("rating:%s*(-?%d+)"))
+      if rating then
+        if rating < -1 then rating = -1 end
+        if rating > 5 then rating = 5 end
+        img.rating = rating
+        print("Set rating for " .. img.filename .. " to " .. rating)
+      else
+        print("No valid rating found for " .. img.filename)
+      end
+      os.remove(jpeg_path)
     end
-
-    local rating = tonumber(output:match("(-?%d+)"))
-    if rating then
-      if rating < -1 then rating = -1 end
-      if rating > 5 then rating = 5 end
-      img.rating = rating
-      print("Set rating for " .. img.filename .. " to " .. rating)
-    else
-      print("No valid rating found for " .. img.filename)
-    end
-    os.remove(jpeg_path)
+    dt.print("Rating complete for " .. #images .. " image(s).")
   end
-  dt.print("Rating complete for " .. #images .. " image(s).")
 end
 
 -----------------------------------------------------------------------
@@ -240,8 +289,11 @@ local function btt_select_best()
   end
   local selected_model = cbb_model.value
   local criteria = cbb_crt.value
-  local prompt = "I am giving you multiple images. Select ONLY the best one (the one with the highest potential for photography). " ..
-                 "Focus on " .. criteria .. ". Respond ONLY with the index number."
+  local prompt = "Compare these images. Select ONLY the best one (the one with the highest potential for photography). " ..
+                 "Focus on " .. criteria .. ". " ..
+                 "Start your response with 'Best Image: <number>' (using the 1-based index of the image in the order provided, e.g. Best Image: 1) followed by a newline. " ..
+                 "Then, provide a detailed comparison and technical justification explaining why you selected it over the other images. " ..
+                 "Do not write anything else before the 'Best Image' header."
 
   local docker_paths = {}          -- container‑visible paths
   local native_paths = {}          -- host‑visible paths
@@ -265,8 +317,8 @@ local function btt_select_best()
     selected_model, prompt, table.concat(docker_paths, " ")
   )
   local command_native = string.format(
-    'ollama run "%s" "%s" %s',
-    selected_model, prompt, table.concat(native_paths, " ")
+    '"%s" run "%s" "%s" %s < /dev/null',
+    get_ollama_path(), selected_model, prompt, table.concat(native_paths, " ")
   )
 
   -- Run depending on selected installation
@@ -283,8 +335,10 @@ local function btt_select_best()
     handle:close()
   end
 
+  output = clean_ollama_output(output, "best image:")
+
   dt.print("Ollama output: " .. output)
-  local chosen_index = tonumber(output:match("(%d+)"))
+  local chosen_index = tonumber(output:lower():match("best image:%s*(%d+)"))
   if not chosen_index or chosen_index < 1 or chosen_index > #images then
     dt.print("Could not determine best image index")
     for _, t in ipairs(tempfile_paths) do os.remove(t.path) end
