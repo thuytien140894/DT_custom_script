@@ -3,6 +3,7 @@ local du = require "lib/dtutils"
 du.check_min_api_version("7.0.0", "moduleExample")
 local gettext = dt.gettext.gettext
 local function _(msgid) return gettext(msgid) end
+
 local function get_ollama_path()
   local osname = dt.configuration.running_os
   if osname == "windows" then
@@ -22,6 +23,18 @@ local function get_ollama_path()
     end
   end
   return "ollama"
+end
+
+local function pad_multiline_text(text, min_lines)
+  if not text or text == "" then
+    return string.rep("\n", min_lines)
+  end
+  local _, count = text:gsub("\n", "")
+  local missing = min_lines - count
+  if missing > 0 then
+    return text .. string.rep("\n", missing)
+  end
+  return text
 end
 
 local function clean_ollama_output(output, start_pattern)
@@ -46,18 +59,6 @@ local function clean_ollama_output(output, start_pattern)
   output = output:gsub("^%s*(.-)%s*$", "%1")
 
   return output
-end
-
-local function pad_multiline_text(text, min_lines)
-  if not text or text == "" then
-    return string.rep("\n", min_lines)
-  end
-  local _, count = text:gsub("\n", "")
-  local missing = min_lines - count
-  if missing > 0 then
-    return text .. string.rep("\n", missing)
-  end
-  return text
 end
 
 local script_data = {}
@@ -250,6 +251,9 @@ local function tag_button()
   end)
 end
 
+-----------------------------------------------------------------------
+-- Rating
+-----------------------------------------------------------------------
 local function make_progress_bar(percent, width)
   width = width or 10
   local filled = math.floor(percent * width)
@@ -385,64 +389,64 @@ local function btt_select_best()
       table.insert(tempfile_paths, { img = img, path = jpeg_path })
     end
 
-    -- Commands for Docker vs Native Ollama
-    local command_docker = string.format(
-      'docker exec ollama ollama run "%s" "%s" %s',
-      selected_model, prompt, table.concat(docker_paths, " ")
-    )
-    local command_native = string.format(
-      '"%s" run "%s" "%s" %s < /dev/null',
-      get_ollama_path(), selected_model, prompt, table.concat(native_paths, " ")
-    )
+  -- Commands for Docker vs Native Ollama
+  local command_docker = string.format(
+    'docker exec ollama ollama run "%s" "%s" %s',
+    selected_model, prompt, table.concat(docker_paths, " ")
+  )
+  local command_native = string.format(
+    '"%s" run "%s" "%s" %s < /dev/null',
+    get_ollama_path(), selected_model, prompt, table.concat(native_paths, " ")
+  )
 
-    -- Run depending on selected installation
-    local output
-    if cbb_ollama.value == "Docker" then
-      print("Running in Docker mode: " .. command_docker)
-      local handle = io.popen(command_docker)
-      output = handle:read("*a")
-      handle:close()
-    else -- Native
-      print("Running in Native mode: " .. command_native)
-      local handle = io.popen(command_native)
-      output = handle:read("*a")
-      handle:close()
-    end
+  -- Run depending on selected installation
+  local output
+  if cbb_ollama.value == "Docker" then
+    print("Running in Docker mode: " .. command_docker)
+    local handle = io.popen(command_docker)
+    output = handle:read("*a")
+    handle:close()
+  else -- Native
+    print("Running in Native mode: " .. command_native)
+    local handle = io.popen(command_native)
+    output = handle:read("*a")
+    handle:close()
+  end
 
-    output = clean_ollama_output(output, "best image:")
+  output = clean_ollama_output(output, "best image:")
 
-    dt.print("Ollama output: " .. output)
-    local chosen_index = tonumber(output:lower():match("best image:%s*(%d+)"))
-    if not chosen_index or chosen_index < 1 or chosen_index > #images then
-      dt.print("Could not determine best image index")
-      for _, t in ipairs(tempfile_paths) do os.remove(t.path) end
-      job.valid = false
-      return
-    end
-
-    for idx, t in ipairs(tempfile_paths) do
-      local members = t.img:get_group_members()
-      if idx ~= chosen_index then
-        for _, m in ipairs(members) do
-          m.rating = -1
-        end
-        print("Rejected group: " .. t.img.filename)
-      else
-        for _, m in ipairs(members) do
-          m.rating = 0
-          pcall(function()
-            m.description = output
-          end)
-        end
-        print("Best image group kept: " .. t.img.filename)
-      end
-      os.remove(t.path)
-    end
-    if txt_evaluation then
-      txt_evaluation.label = pad_multiline_text(output, 8)
-    end
+  dt.print("Ollama output: " .. output)
+  local chosen_index = tonumber(output:lower():match("best image:%s*(%d+)"))
+  if not chosen_index or chosen_index < 1 or chosen_index > #images then
+    dt.print("Could not determine best image index")
+    for _, t in ipairs(tempfile_paths) do os.remove(t.path) end
     job.valid = false
-    dt.print("Best image kept. Others rejected.")
+    return
+  end
+
+  for idx, t in ipairs(tempfile_paths) do
+    local members = t.img:get_group_members()
+    if idx ~= chosen_index then
+      for _, m in ipairs(members) do
+        m.rating = -1
+      end
+      print("Rejected group: " .. t.img.filename)
+    else
+      for _, m in ipairs(members) do
+        m.rating = 0
+        pcall(function()
+          m.description = output
+        end)
+      end
+      print("Best image group kept: " .. t.img.filename)
+    end
+    os.remove(t.path)
+  end
+  if txt_evaluation then
+    txt_evaluation.label = pad_multiline_text(output, 8)
+  end
+  job.valid = false
+  dt.print("Best image kept. Others rejected.")
   end)
 end
 
@@ -477,7 +481,6 @@ local lbl_reject = dt.new_widget("section_label"); lbl_reject.label = _("AI's To
 local generate_button = dt.new_widget("button") {label=_("Generate"), clicked_callback=function(_) tag_button() end}
 local rating_button = dt.new_widget("button") {label=_("Generate"), clicked_callback=function(_) btt_rating() end}
 local reject_button = dt.new_widget("button") {label=_("Generate"), clicked_callback=function(_) btt_select_best() end}
-
 mE.widgets = {
   lbl_tag, cbt_clear, cbb_tag, separator1, generate_button,
   lbl_rating, cbb_lvl, rating_button,
@@ -496,6 +499,7 @@ else
     mE.event_registered = true
   end
 end
+
 
 dt.register_event("AIToolbox_selection", "selection-changed", function(event)
   dt.control.dispatch(function()
