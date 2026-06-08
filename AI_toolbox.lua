@@ -50,6 +50,11 @@ local function clean_ollama_output(output, start_pattern)
   if start_pattern then
     local lower_output = output:lower()
     local start_idx = lower_output:find(start_pattern:lower())
+    if not start_idx then
+      -- If not found, try finding start_pattern without its trailing colon/spaces
+      local trimmed_pattern = start_pattern:gsub("[:%s]+$", "")
+      start_idx = lower_output:find(trimmed_pattern:lower())
+    end
     if start_idx then
       output = output:sub(start_idx)
     end
@@ -220,8 +225,8 @@ local cbb_tag = dt.new_widget("combobox") {
 }
 local cbb_model = dt.new_widget("combobox") {
   label = _("Model"),
-  value = 5,
-  "gemma3:27b","gemma3:12b","gemma3:4b","minicpm-v:8b","llava:7b"
+  value = 6,
+  "gemma3:27b","gemma3:12b","gemma3:4b","llama3.2-vision:11b","minicpm-v:8b","qwen2.5vl:7b","llava:7b"
 }
 local cbb_lvl = dt.new_widget("combobox") {
   label = _("Strictness"),
@@ -282,12 +287,11 @@ local function tag_button()
   local nb_tag = cbb_tag.value
 
   dt.control.dispatch(function()
-    local job = dt.gui.create_job("AI Tag Assistant: analyzing " .. #images .. " image(s)...", true)
+    local job = dt.gui.create_job("AI Tag Assistant: analyzing " .. #images .. " image(s)...", false)
 
     for idx, img in ipairs(images) do
-      job.percent = (idx - 1) / #images
       if txt_evaluation then
-        txt_evaluation.label = pad_multiline_text("AI Tagging: Analyzing image " .. idx .. " of " .. #images .. "\n" .. make_progress_bar((idx - 1) / #images), 8)
+        txt_evaluation.label = pad_multiline_text("AI Tagging: Analyzing image " .. idx .. " of " .. #images .. "...\n(Analyzing...)", 8)
       end
       dt.print(string.format("AI Tagging: Analyzing %d/%d (%s)...", idx, #images, img.filename))
       dt.control.sleep(50) -- Yield to GUI thread to draw progress
@@ -355,7 +359,6 @@ local function tag_button()
       end
 
       os.remove(jpeg_path) -- clean up
-      job.percent = idx / #images
     end
     job.valid = false
     if txt_evaluation then
@@ -384,12 +387,11 @@ local function btt_rating()
   local selected_model = cbb_model.value
   local strictness = cbb_lvl.value
 
-  local job = dt.gui.create_job("AI Rating: evaluating " .. #images .. " image(s)...", true)
+  local job = dt.gui.create_job("AI Rating: evaluating " .. #images .. " image(s)...", false)
 
   for idx, img in ipairs(images) do
-    job.percent = (idx - 1) / #images
     if txt_evaluation then
-      txt_evaluation.label = pad_multiline_text("AI Rating: Evaluating image " .. idx .. " of " .. #images .. "\n" .. make_progress_bar((idx - 1) / #images), 8)
+      txt_evaluation.label = pad_multiline_text("AI Rating: Evaluating image " .. idx .. " of " .. #images .. "...\n(Evaluating...)", 8)
     end
     dt.print(string.format("AI Rating: Evaluating %d/%d (%s)...", idx, #images, img.filename))
     dt.control.sleep(50) -- Yield to GUI thread to draw progress
@@ -452,7 +454,6 @@ local function btt_rating()
       txt_evaluation.label = pad_multiline_text(output, 8)
     end
     os.remove(jpeg_path)
-    job.percent = idx / #images
   end
   job.valid = false
   dt.print("Rating complete for " .. #images .. " image(s).")
@@ -471,7 +472,7 @@ local function btt_select_best()
   
   local job = dt.gui.create_job("AI Top Pick: comparing " .. #images .. " images...", false)
   if txt_evaluation then
-    txt_evaluation.label = pad_multiline_text("AI Top Pick: Comparing " .. #images .. " images...\n" .. make_progress_bar(0.5) .. " (Analyzing)", 8)
+    txt_evaluation.label = pad_multiline_text("AI Top Pick: Comparing " .. #images .. " images...\n(Analyzing...)", 8)
   end
   dt.print("AI Top Pick: Comparing " .. #images .. " images...")
   dt.control.sleep(50) -- Yield to GUI thread to draw spinner
@@ -523,7 +524,33 @@ local function btt_select_best()
   output = clean_ollama_output(output, "best image:")
 
   dt.print("Ollama output: " .. output)
-  local chosen_index = tonumber(output:lower():match("best image:%s*(%d+)"))
+  
+  local chosen_index = nil
+  local clean_match_text = output:gsub("[*%#%_]", "")
+  local lower_match_text = clean_match_text:lower()
+  
+  -- Try standard match first: "best image: 1"
+  chosen_index = tonumber(lower_match_text:match("best image:%s*(%d+)"))
+  
+  if not chosen_index then
+    -- Try match without colon: "best image 1"
+    chosen_index = tonumber(lower_match_text:match("best image%s*(%d+)"))
+  end
+  
+  if not chosen_index then
+    -- Find the position of "best image" and find the first number that follows it
+    local start_pos = lower_match_text:find("best image")
+    if start_pos then
+      local after_phrase = lower_match_text:sub(start_pos)
+      chosen_index = tonumber(after_phrase:match("(%d+)"))
+    end
+  end
+  
+  if not chosen_index then
+    -- Fallback to "best: <number>" or "best <number>"
+    chosen_index = tonumber(lower_match_text:match("best:%s*(%d+)")) or tonumber(lower_match_text:match("best%s*(%d+)"))
+  end
+
   if not chosen_index or chosen_index < 1 or chosen_index > #images then
     dt.print("Could not determine best image index")
     for _, t in ipairs(tempfile_paths) do os.remove(t.path) end
@@ -532,16 +559,33 @@ local function btt_select_best()
   end
 
   ai_action_active = true
+  local best_img = tempfile_paths[chosen_index].img
+  local best_members = best_img:get_group_members()
+  local keep_group_ids = {}
+  for _, m in ipairs(best_members) do
+    keep_group_ids[m.id] = true
+  end
+
+  local to_reject = {}
+  local rejected_ids = {}
+
   for idx, t in ipairs(tempfile_paths) do
     local members = t.img:get_group_members()
-    if known_ratings[t.img.id] == nil then
-      known_ratings[t.img.id] = t.img.rating
-    end
     if idx ~= chosen_index then
-      set_image_rating(t.img, -1)
-      check_and_log_changes({t.img})
+      for _, m in ipairs(members) do
+        if not keep_group_ids[m.id] and not rejected_ids[m.id] then
+          rejected_ids[m.id] = true
+          if known_ratings[m.id] == nil then
+            known_ratings[m.id] = m.rating
+          end
+          table.insert(to_reject, m)
+        end
+      end
       print("Rejected group: " .. t.img.filename)
     else
+      if known_ratings[t.img.id] == nil then
+        known_ratings[t.img.id] = t.img.rating
+      end
       set_image_rating(t.img, 0)
       for _, m in ipairs(members) do
         pcall(function()
@@ -553,6 +597,25 @@ local function btt_select_best()
     end
     os.remove(t.path)
   end
+
+  -- Apply batch rejection for all collected images
+  if #to_reject > 0 then
+    for _, m in ipairs(to_reject) do
+      m.rating = 0
+    end
+    dt.destroy_event("AIToolbox_selection", "selection-changed")
+    local old_selection = dt.gui.selection()
+    dt.gui.selection(to_reject)
+    dt.gui.action("views/thumbtable/rating", "reject", "activate", 1.000)
+    dt.control.sleep(150)
+    dt.gui.selection(old_selection)
+    dt.register_event("AIToolbox_selection", "selection-changed", on_selection_changed)
+    
+    for _, m in ipairs(to_reject) do
+      check_and_log_changes({m})
+    end
+  end
+
   ai_action_active = false
   
   -- Select only the best image chosen by the AI
