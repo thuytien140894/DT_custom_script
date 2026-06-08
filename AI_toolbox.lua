@@ -241,7 +241,7 @@ local cbb_crt = dt.new_widget("combobox") {
 local sld_quality = dt.new_widget("slider") {
   label = _("Temporary JPG quality "),
   soft_min = 0, soft_max = 100, hard_min = 0, hard_max = 100,
-  step = 1, digits = 0, value = 95
+  step = 1, digits = 0, value = 100
 }
 local sld_size = dt.new_widget("slider") {
   label = _("Temporary JPG size"),
