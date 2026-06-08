@@ -262,14 +262,20 @@ local separator1 = dt.new_widget("separator"){}
 -----------------------------------------------------------------------
 -- Export helper
 -----------------------------------------------------------------------
-local function export_to_temp_jpeg(img)
+local function export_to_temp_jpeg(img, max_size_override)
   local temp_file = os.tmpname() .. ".jpg"
   local jpeg_exporter = dt.new_format("jpeg")
   jpeg_exporter.quality = sld_quality.value
-  jpeg_exporter.max_width = sld_size.value
-  jpeg_exporter.max_height = sld_size.value
+  
+  local export_size = sld_size.value
+  if max_size_override and (export_size == 0 or export_size > max_size_override) then
+    export_size = max_size_override
+  end
+
+  jpeg_exporter.max_width = export_size
+  jpeg_exporter.max_height = export_size
   jpeg_exporter:write_image(img, temp_file, true)
-  dt.print_log(string.format("Exported %s to temp file %s", img.filename, temp_file))
+  dt.print_log(string.format("Exported %s to temp file %s (size: %d)", img.filename, temp_file, export_size))
   return temp_file
 end
 
@@ -489,7 +495,7 @@ local function btt_select_best()
   local tempfile_paths = {}        -- keep track for cleanup
 
   for idx, img in ipairs(images) do
-    local jpeg_path = export_to_temp_jpeg(img)
+    local jpeg_path = export_to_temp_jpeg(img, 1024)
     if not jpeg_path then
       dt.print("Export failed for " .. img.filename)
       job.valid = false
