@@ -226,7 +226,7 @@ local cbb_tag = dt.new_widget("combobox") {
 local cbb_model = dt.new_widget("combobox") {
   label = _("Model"),
   value = 6,
-  "gemma3:27b","gemma3:12b","gemma3:4b","llama3.2-vision:11b","minicpm-v:8b","qwen2.5vl:7b","llava:7b"
+  "gemma3:27b","gemma3:12b","gemma3:4b","llama3.2-vision:11b","minicpm-v:8b","qwen2.5vl:7b-ctx8k","llava:7b"
 }
 local cbb_lvl = dt.new_widget("combobox") {
   label = _("Strictness"),
