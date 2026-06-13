@@ -486,9 +486,8 @@ local function btt_select_best()
   local criteria = cbb_crt.value
   local prompt = "Compare these images. Select ONLY the best one (the one with the highest potential for photography). " ..
                  "Focus on " .. criteria .. ". " ..
-                 "Start your response with 'Best Image: <number>' (using the 1-based index of the image in the order provided, e.g. Best Image: 1) followed by a newline. " ..
-                 "Then, provide a detailed comparison and technical justification explaining why you selected it over the other images. " ..
-                 "Do not write anything else before the 'Best Image' header."
+                 "First, provide a detailed comparison and technical justification explaining which image is better and why. " ..
+                 "Then, at the very end of your response, write exactly 'Best Image: <number>' (using the 1-based index of the image in the order provided, e.g. Best Image: 1) on a new line."
 
   local docker_paths = {}          -- container‑visible paths
   local native_paths = {}          -- host‑visible paths
@@ -527,7 +526,7 @@ local function btt_select_best()
     output = run_command_background(command_native)
   end
 
-  output = clean_ollama_output(output, "best image:")
+  output = clean_ollama_output(output)
 
   dt.print("Ollama output: " .. output)
   
@@ -535,18 +534,21 @@ local function btt_select_best()
   local clean_match_text = output:gsub("[*%#%_]", "")
   local lower_match_text = clean_match_text:lower()
   
-  -- Try standard match first: "best image: 1"
-  chosen_index = tonumber(lower_match_text:match("best image:%s*(%d+)"))
+  -- Try standard match first: "best image: 1" (using .* to get the last occurrence)
+  chosen_index = tonumber(lower_match_text:match(".*best image:%s*(%d+)"))
   
   if not chosen_index then
     -- Try match without colon: "best image 1"
-    chosen_index = tonumber(lower_match_text:match("best image%s*(%d+)"))
+    chosen_index = tonumber(lower_match_text:match(".*best image%s*(%d+)"))
   end
   
   if not chosen_index then
-    -- Find the position of "best image" and find the first number that follows it
-    local start_pos = lower_match_text:find("best image")
-    if start_pos then
+    -- Find the position of the last "best image"
+    -- and find the first number that follows it
+    local rev_text = lower_match_text:reverse()
+    local rev_pos = rev_text:find("egami tseb")
+    if rev_pos then
+      local start_pos = #lower_match_text - rev_pos - #"best image" + 2
       local after_phrase = lower_match_text:sub(start_pos)
       chosen_index = tonumber(after_phrase:match("(%d+)"))
     end
@@ -554,7 +556,7 @@ local function btt_select_best()
   
   if not chosen_index then
     -- Fallback to "best: <number>" or "best <number>"
-    chosen_index = tonumber(lower_match_text:match("best:%s*(%d+)")) or tonumber(lower_match_text:match("best%s*(%d+)"))
+    chosen_index = tonumber(lower_match_text:match(".*best:%s*(%d+)")) or tonumber(lower_match_text:match(".*best%s*(%d+)"))
   end
 
   if not chosen_index or chosen_index < 1 or chosen_index > #images then
