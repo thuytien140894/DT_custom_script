@@ -115,6 +115,23 @@ local function check_and_log_changes(images)
   end
 end
 
+local function get_sorted_selection()
+  local images = dt.gui.selection()
+  if not images or #images == 0 then
+    return {}
+  end
+  table.sort(images, function(a, b)
+    local path_a = (a.path or "") .. "/" .. (a.filename or "")
+    local path_b = (b.path or "") .. "/" .. (b.filename or "")
+    if path_a ~= path_b then
+      return path_a < path_b
+    else
+      return (a.id or 0) < (b.id or 0)
+    end
+  end)
+  return images
+end
+
 local function on_selection_changed(event)
   -- 1. Check if any previously selected image's rating changed
   if #previously_selected_images > 0 then
@@ -137,7 +154,7 @@ local function on_selection_changed(event)
 
   pcall(function()
     if txt_evaluation then
-      local images = dt.gui.selection()
+      local images = get_sorted_selection()
       if #images == 1 then
         local img = images[1]
         local desc = img.description or ""
@@ -283,7 +300,7 @@ end
 -- Tagging
 -----------------------------------------------------------------------
 local function tag_button()
-  local images = dt.gui.selection()
+  local images = get_sorted_selection()
   if #images == 0 then
     dt.print("No image selected")
     return
@@ -386,7 +403,7 @@ end
 
 
 local function btt_rating()
-  local images = dt.gui.selection()
+  local images = get_sorted_selection()
   if #images == 0 then
     dt.print("No image selected") return
   end
@@ -469,7 +486,7 @@ end
 -- Select Best Image
 -----------------------------------------------------------------------
 local function btt_select_best()
-  local images = dt.gui.selection()
+  local images = get_sorted_selection()
   if #images < 2 then
     dt.print("Select at least two images")
     return
