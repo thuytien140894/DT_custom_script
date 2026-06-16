@@ -1,3 +1,4 @@
+Escape=views/slideshow/exit slideshow
 Left=disabled;views/darkroom/move/horizontal;down
 Right=disabled;views/darkroom/move/horizontal;up
 None;left=fallbacks/utility module
@@ -87,8 +88,6 @@ y;cmd=views/map/redo
 z;cmd=views/darkroom/undo
 z;cmd=views/map/undo
 BackSpace=views/darkroom/image back
-Escape=views/slideshow/exit slideshow
-Escape=views/darkroom/full preview;toggle
 Left=views/map/scroll left
 Left=views/slideshow/step back
 Left=views/darkroom/image back
