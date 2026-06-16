@@ -725,6 +725,32 @@ end
 
 dt.register_event("AIToolbox_selection", "selection-changed", on_selection_changed)
 
+local function are_panels_hidden()
+  local panels = {"DT_UI_PANEL_TOP", "DT_UI_PANEL_LEFT", "DT_UI_PANEL_RIGHT", "DT_UI_PANEL_BOTTOM"}
+  for _, panel in ipairs(panels) do
+    if dt.gui.panel_visible(panel) then
+      return false
+    end
+  end
+  return true
+end
+
+dt.register_event("AIToolbox_toggle_fullscreen", "shortcut", function(event, shortcut)
+  if dt.gui.current_view().id == "darkroom" then
+    if are_panels_hidden() then
+      dt.gui.panel_show_all()
+    else
+      dt.gui.panel_hide_all()
+    end
+  end
+end, "Toggle Fullscreen (Panels) in Darkroom")
+
+dt.register_event("AIToolbox_exit_fullscreen", "shortcut", function(event, shortcut)
+  if dt.gui.current_view().id == "darkroom" and are_panels_hidden() then
+    dt.gui.panel_show_all()
+  end
+end, "Exit Fullscreen (Panels) in Darkroom")
+
 script_data.destroy = destroy
 script_data.restart = restart
 script_data.destroy_method = "hide"
