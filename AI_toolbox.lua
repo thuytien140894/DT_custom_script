@@ -725,6 +725,22 @@ end
 
 dt.register_event("AIToolbox_selection", "selection-changed", on_selection_changed)
 
+local panels_hidden = false
+
+dt.register_event("AIToolbox_toggle_fullscreen", "shortcut", function(event, shortcut)
+  if dt.gui.current_view().id == "darkroom" then
+    dt.gui.action("global/panels/all", 0, "activate")
+    panels_hidden = not panels_hidden
+  end
+end, "Toggle Fullscreen (Panels) in Darkroom")
+
+dt.register_event("AIToolbox_exit_fullscreen", "shortcut", function(event, shortcut)
+  if dt.gui.current_view().id == "darkroom" and panels_hidden then
+    dt.gui.action("global/panels/all", 0, "activate")
+    panels_hidden = false
+  end
+end, "Exit Fullscreen (Panels) in Darkroom")
+
 script_data.destroy = destroy
 script_data.restart = restart
 script_data.destroy_method = "hide"
