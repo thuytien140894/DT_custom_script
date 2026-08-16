@@ -553,8 +553,8 @@ local function btt_select_best()
   else -- Native (use compare_images.py multi-turn chat API)
     local helper_script = dt.configuration.config_dir .. "/lua/DT_custom_script/compare_images.py"
     local command_native = string.format(
-      '"%s" "%s" "%s" %q %s',
-      get_python_path(), helper_script, selected_model, prompt, table.concat(native_paths, " ")
+      '"%s" "%s" "%s" "%s" %s',
+      get_python_path(), helper_script, selected_model, prompt:gsub('"', '\\"'), table.concat(native_paths, " ")
     )
     print("Running in Native mode with multi-turn API helper: " .. command_native)
     output = run_command_background(command_native)

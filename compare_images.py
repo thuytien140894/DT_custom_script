@@ -6,6 +6,9 @@ import urllib.request
 import urllib.error
 
 def main():
+    with open("/tmp/compare_debug.log", "a") as logf:
+        logf.write(f"\n[ENTRY] argv={sys.argv}\n")
+
     if len(sys.argv) < 3:
         sys.stderr.write("Usage: compare_images.py <model> <prompt> <image1> <image2> ...\n")
         sys.exit(1)
