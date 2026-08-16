@@ -15,13 +15,15 @@ def main():
     image_paths = sys.argv[3:]
 
     def get_b64(path):
-        with open(path, "rb") as f:
+        clean_p = path.strip().strip('"\'')
+        with open(clean_p, "rb") as f:
             return base64.b64encode(f.read()).decode("utf-8")
 
     messages = []
     for idx, p in enumerate(image_paths, 1):
+        clean_p = p.strip().strip('"\'')
         try:
-            b64_data = get_b64(p)
+            b64_data = get_b64(clean_p)
             messages.append({"role": "user", "content": f"Here is Image {idx}:", "images": [b64_data]})
             messages.append({"role": "assistant", "content": f"Received Image {idx}."})
         except Exception as e:
