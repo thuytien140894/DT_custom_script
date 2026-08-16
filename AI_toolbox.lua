@@ -550,35 +550,13 @@ local function btt_select_best()
     )
     print("Running in Docker mode: " .. command_docker)
     output = run_command_background(command_docker)
-  else -- Native (use multi-turn chat API to guarantee all images are delivered to model)
-    local py_script = [[
-import sys, json, base64, urllib.request
-
-model = sys.argv[1]
-prompt = sys.argv[2]
-image_paths = sys.argv[3:]
-
-def get_b64(path):
-    with open(path, 'rb') as f:
-        return base64.b64encode(f.read()).decode('utf-8')
-
-messages = []
-for idx, p in enumerate(image_paths, 1):
-    messages.append({'role': 'user', 'content': f'Here is Image {idx}:', 'images': [get_b64(p)]})
-    messages.append({'role': 'assistant', 'content': f'Received Image {idx}.'})
-messages.append({'role': 'user', 'content': prompt})
-
-data = json.dumps({'model': model, 'messages': messages, 'stream': False}).encode('utf-8')
-req = urllib.request.Request('http://localhost:11434/api/chat', data=data, headers={'Content-Type': 'application/json'})
-resp = urllib.request.urlopen(req)
-res_json = json.loads(resp.read().decode('utf-8'))
-sys.stdout.write(res_json.get('message', {}).get('content', ''))
-]]
+  else -- Native (use compare_images.py multi-turn chat API)
+    local helper_script = dt.configuration.config_dir .. "/lua/DT_custom_script/compare_images.py"
     local command_native = string.format(
-      '"%s" -c %q "%s" %q %s',
-      get_python_path(), py_script, selected_model, prompt, table.concat(native_paths, " ")
+      '"%s" "%s" "%s" %q %s',
+      get_python_path(), helper_script, selected_model, prompt, table.concat(native_paths, " ")
     )
-    print("Running in Native mode with multi-turn API")
+    print("Running in Native mode with multi-turn API helper: " .. command_native)
     output = run_command_background(command_native)
   end
 
@@ -590,9 +568,17 @@ sys.stdout.write(res_json.get('message', {}).get('content', ''))
   local clean_match_text = output:gsub("[*%#%_]", "")
   local lower_match_text = clean_match_text:lower()
   
-  -- Try standard match first: "best image: 1" (using .* to get the last occurrence)
+  -- Try standard match first: "best image: 1" or "best image is 1" or "best image is image 1"
   chosen_index = tonumber(lower_match_text:match(".*best image:%s*(%d+)"))
   
+  if not chosen_index then
+    chosen_index = tonumber(lower_match_text:match(".*best image%s*is%s*image%s*(%d+)"))
+  end
+
+  if not chosen_index then
+    chosen_index = tonumber(lower_match_text:match(".*best image%s*is%s*(%d+)"))
+  end
+
   if not chosen_index then
     -- Try match without colon: "best image 1"
     chosen_index = tonumber(lower_match_text:match(".*best image%s*(%d+)"))
@@ -611,8 +597,11 @@ sys.stdout.write(res_json.get('message', {}).get('content', ''))
   end
   
   if not chosen_index then
-    -- Fallback to "best: <number>" or "best <number>"
-    chosen_index = tonumber(lower_match_text:match(".*best:%s*(%d+)")) or tonumber(lower_match_text:match(".*best%s*(%d+)"))
+    -- Fallback to "best: <number>" or "best <number>" or "image <number> is the best"
+    chosen_index = tonumber(lower_match_text:match(".*best:%s*(%d+)")) or 
+                   tonumber(lower_match_text:match(".*best%s*(%d+)")) or
+                   tonumber(lower_match_text:match(".*image%s*(%d+)%s*is%s*the%s*best")) or
+                   tonumber(lower_match_text:match(".*image%s*(%d+)%s*is%s*better"))
   end
 
   if not chosen_index or chosen_index < 1 or chosen_index > #images then
