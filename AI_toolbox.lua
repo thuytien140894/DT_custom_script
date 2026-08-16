@@ -565,12 +565,13 @@ local function btt_select_best()
 
     local helper_script = dt.configuration.config_dir .. "/lua/DT_custom_script/compare_images.py"
     local command_native = string.format(
-      '"%s" "%s" "%s"',
+      '"%s" "%s" "%s" 2>&1',
       get_python_path(), helper_script, json_req_path
     )
+    log_debug("TOP_PICK_DEBUG", "Command", command_native)
     print("Running in Native mode with multi-turn API helper: " .. command_native)
     output = run_command_background(command_native)
-    os.remove(json_req_path)
+    -- os.remove(json_req_path)
   end
 
   output = clean_ollama_output(output)
