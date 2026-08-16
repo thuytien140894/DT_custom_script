@@ -43,8 +43,14 @@ def main():
         with urllib.request.urlopen(req, timeout=300) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             content = data.get("message", {}).get("content", "")
+            
+            with open("/tmp/compare_debug.log", "a") as logf:
+                logf.write(f"\n--- CALL model={model} images={len(image_paths)} ---\n{content}\n")
+                
             sys.stdout.write(content)
     except urllib.error.URLError as e:
+        with open("/tmp/compare_debug.log", "a") as logf:
+            logf.write(f"\n--- ERROR: {e} ---\n")
         sys.stderr.write(f"Ollama API request failed: {e}\n")
         sys.exit(1)
 

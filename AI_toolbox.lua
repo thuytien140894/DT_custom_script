@@ -606,6 +606,10 @@ local function btt_select_best()
 
   if not chosen_index or chosen_index < 1 or chosen_index > #images then
     dt.print("Could not determine best image index")
+    log_debug("TOP_PICK_ERROR", string.format("images_count=%d output=%s", #images, output))
+    if txt_evaluation then
+      txt_evaluation.label = pad_multiline_text("AI Top Pick Output:\n" .. output, 8)
+    end
     for _, t in ipairs(tempfile_paths) do os.remove(t.path) end
     job.valid = false
     return
