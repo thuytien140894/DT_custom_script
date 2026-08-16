@@ -25,6 +25,24 @@ local function get_ollama_path()
   return "ollama"
 end
 
+local function get_python_path()
+  local paths = {
+    "/usr/bin/python3",
+    "/usr/local/bin/python3",
+    "/opt/homebrew/bin/python3",
+    "python3",
+    "python"
+  }
+  for _, path in ipairs(paths) do
+    local f = io.open(path, "r")
+    if f then
+      f:close()
+      return path
+    end
+  end
+  return "python3"
+end
+
 local function pad_multiline_text(text, min_lines)
   if not text or text == "" then
     return string.rep("\n", min_lines)
@@ -524,22 +542,43 @@ local function btt_select_best()
   end
 
   -- Commands for Docker vs Native Ollama
-  local command_docker = string.format(
-    'docker exec ollama ollama run "%s" "%s" %s',
-    selected_model, prompt, table.concat(docker_paths, " ")
-  )
-  local command_native = string.format(
-    '"%s" run "%s" "%s" %s < /dev/null',
-    get_ollama_path(), selected_model, prompt, table.concat(native_paths, " ")
-  )
-
-  -- Run depending on selected installation
   local output
   if cbb_ollama.value == "Docker" then
+    local command_docker = string.format(
+      'docker exec ollama ollama run "%s" "%s" %s',
+      selected_model, prompt, table.concat(docker_paths, " ")
+    )
     print("Running in Docker mode: " .. command_docker)
     output = run_command_background(command_docker)
-  else -- Native
-    print("Running in Native mode: " .. command_native)
+  else -- Native (use multi-turn chat API to guarantee all images are delivered to model)
+    local py_script = [[
+import sys, json, base64, urllib.request
+
+model = sys.argv[1]
+prompt = sys.argv[2]
+image_paths = sys.argv[3:]
+
+def get_b64(path):
+    with open(path, 'rb') as f:
+        return base64.b64encode(f.read()).decode('utf-8')
+
+messages = []
+for idx, p in enumerate(image_paths, 1):
+    messages.append({'role': 'user', 'content': f'Here is Image {idx}:', 'images': [get_b64(p)]})
+    messages.append({'role': 'assistant', 'content': f'Received Image {idx}.'})
+messages.append({'role': 'user', 'content': prompt})
+
+data = json.dumps({'model': model, 'messages': messages, 'stream': False}).encode('utf-8')
+req = urllib.request.Request('http://localhost:11434/api/chat', data=data, headers={'Content-Type': 'application/json'})
+resp = urllib.request.urlopen(req)
+res_json = json.loads(resp.read().decode('utf-8'))
+sys.stdout.write(res_json.get('message', {}).get('content', ''))
+]]
+    local command_native = string.format(
+      '"%s" -c %q "%s" %q %s',
+      get_python_path(), py_script, selected_model, prompt, table.concat(native_paths, " ")
+    )
+    print("Running in Native mode with multi-turn API")
     output = run_command_background(command_native)
   end
 
