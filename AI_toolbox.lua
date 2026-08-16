@@ -47,12 +47,52 @@ local function pad_multiline_text(text, min_lines)
   if not text or text == "" then
     return string.rep("\n", min_lines)
   end
-  local _, count = text:gsub("\n", "")
+
+  local max_length = 80
+  local wrapped_lines = {}
+  
+  -- Handle word wrapping
+  for line in text:gmatch("([^\n]*)\n?") do
+    if line == "" then
+      table.insert(wrapped_lines, "")
+    else
+      local current_line = ""
+      for word in line:gmatch("%S+") do
+        if #current_line + #word + 1 > max_length then
+          if current_line ~= "" then
+            table.insert(wrapped_lines, current_line)
+            current_line = word
+          else
+            table.insert(wrapped_lines, word)
+            current_line = ""
+          end
+        else
+          if current_line == "" then
+            current_line = word
+          else
+            current_line = current_line .. " " .. word
+          end
+        end
+      end
+      if current_line ~= "" then
+        table.insert(wrapped_lines, current_line)
+      end
+    end
+  end
+  
+  -- The gmatch might add an extra empty line at the end if text didn't end with \n
+  if wrapped_lines[#wrapped_lines] == "" and text:sub(-1) ~= "\n" then
+    table.remove(wrapped_lines)
+  end
+
+  local wrapped_text = table.concat(wrapped_lines, "\n")
+  local count = #wrapped_lines
+
   local missing = min_lines - count
   if missing > 0 then
-    return text .. string.rep("\n", missing)
+    return wrapped_text .. string.rep("\n", missing)
   end
-  return text
+  return wrapped_text
 end
 
 local function clean_ollama_output(output, start_pattern)
