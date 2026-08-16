@@ -4,23 +4,42 @@ import json
 import base64
 import urllib.request
 import urllib.error
+import os
+
+def log(msg):
+    try:
+        with open("/tmp/compare_debug.log", "a") as f:
+            f.write(msg + "\n")
+    except Exception:
+        pass
+
+def get_b64(path):
+    clean_p = path.strip().strip('"\'')
+    with open(clean_p, "rb") as f:
+        return base64.b64encode(f.read()).decode("utf-8")
 
 def main():
-    with open("/tmp/compare_debug.log", "a") as logf:
-        logf.write(f"\n[ENTRY] argv={sys.argv}\n")
+    log(f"[ENTRY] sys.argv={sys.argv}")
 
-    if len(sys.argv) < 3:
-        sys.stderr.write("Usage: compare_images.py <model> <prompt> <image1> <image2> ...\n")
+    if len(sys.argv) < 2:
+        sys.stderr.write("Usage: compare_images.py <config.json> OR compare_images.py <model> <prompt> <img1> <img2>...\n")
         sys.exit(1)
 
-    model = sys.argv[1]
-    prompt = sys.argv[2]
-    image_paths = sys.argv[3:]
-
-    def get_b64(path):
-        clean_p = path.strip().strip('"\'')
-        with open(clean_p, "rb") as f:
-            return base64.b64encode(f.read()).decode("utf-8")
+    # Option 1: Config JSON file passed as sole argument
+    if len(sys.argv) == 2 and sys.argv[1].endswith(".json") and os.path.exists(sys.argv[1]):
+        with open(sys.argv[1], "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+        model = cfg.get("model", "")
+        prompt = cfg.get("prompt", "")
+        image_paths = cfg.get("images", [])
+    # Option 2: CLI arguments
+    elif len(sys.argv) >= 3:
+        model = sys.argv[1]
+        prompt = sys.argv[2]
+        image_paths = sys.argv[3:]
+    else:
+        sys.stderr.write("Invalid arguments.\n")
+        sys.exit(1)
 
     messages = []
     for idx, p in enumerate(image_paths, 1):
@@ -30,7 +49,8 @@ def main():
             messages.append({"role": "user", "content": f"Here is Image {idx}:", "images": [b64_data]})
             messages.append({"role": "assistant", "content": f"Received Image {idx}."})
         except Exception as e:
-            sys.stderr.write(f"Failed to read image {p}: {e}\n")
+            log(f"[ERROR] Failed to read image {clean_p}: {e}")
+            sys.stderr.write(f"Failed to read image {clean_p}: {e}\n")
             sys.exit(1)
 
     messages.append({"role": "user", "content": prompt})
@@ -46,14 +66,10 @@ def main():
         with urllib.request.urlopen(req, timeout=300) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             content = data.get("message", {}).get("content", "")
-            
-            with open("/tmp/compare_debug.log", "a") as logf:
-                logf.write(f"\n--- CALL model={model} images={len(image_paths)} ---\n{content}\n")
-                
+            log(f"[SUCCESS] model={model} images={len(image_paths)}\nOutput:\n{content}")
             sys.stdout.write(content)
     except urllib.error.URLError as e:
-        with open("/tmp/compare_debug.log", "a") as logf:
-            logf.write(f"\n--- ERROR: {e} ---\n")
+        log(f"[ERROR] Ollama request failed: {e}")
         sys.stderr.write(f"Ollama API request failed: {e}\n")
         sys.exit(1)
 

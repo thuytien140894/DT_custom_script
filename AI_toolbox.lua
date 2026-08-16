@@ -550,14 +550,27 @@ local function btt_select_best()
     )
     print("Running in Docker mode: " .. command_docker)
     output = run_command_background(command_docker)
-  else -- Native (use compare_images.py multi-turn chat API)
+  else -- Native (use compare_images.py multi-turn chat API via temp JSON file)
+    local json_req_path = dt.configuration.tmp_dir .. "/dt_ai_compare_req.json"
+    local req_file = io.open(json_req_path, "w")
+    if req_file then
+      local json_imgs = {}
+      for _, t in ipairs(tempfile_paths) do
+        table.insert(json_imgs, string.format("%q", t.path))
+      end
+      req_file:write(string.format('{"model": %q, "prompt": %q, "images": [%s]}',
+        selected_model, prompt, table.concat(json_imgs, ", ")))
+      req_file:close()
+    end
+
     local helper_script = dt.configuration.config_dir .. "/lua/DT_custom_script/compare_images.py"
     local command_native = string.format(
-      '"%s" "%s" "%s" "%s" %s',
-      get_python_path(), helper_script, selected_model, prompt:gsub('"', '\\"'), table.concat(native_paths, " ")
+      '"%s" "%s" "%s"',
+      get_python_path(), helper_script, json_req_path
     )
     print("Running in Native mode with multi-turn API helper: " .. command_native)
     output = run_command_background(command_native)
+    os.remove(json_req_path)
   end
 
   output = clean_ollama_output(output)
